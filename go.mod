@@ -1,4 +1,4 @@
-module andskur/chi-prometheus
+module github.com/andskur/chi-prometheus
 
 go 1.19
 
