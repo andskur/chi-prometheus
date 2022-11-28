@@ -3,6 +3,7 @@ package chiprometheus
 
 import (
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -30,11 +31,11 @@ type Middleware struct {
 }
 
 // NewMiddleware returns a new prometheus Middleware handler.
-func NewMiddleware(name string, buckets ...float64) func(next http.Handler) http.Handler {
+func NewMiddleware(name, prefix string, buckets ...float64) func(next http.Handler) http.Handler {
 	var m Middleware
 	m.reqs = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
-			Name:        reqsName,
+			Name:        addPrefixIfNeeded(reqsName, prefix),
 			Help:        "How many HTTP requests processed, partitioned by status code, method and HTTP path.",
 			ConstLabels: prometheus.Labels{"service": name},
 		},
@@ -46,7 +47,7 @@ func NewMiddleware(name string, buckets ...float64) func(next http.Handler) http
 		buckets = dflBuckets
 	}
 	m.latency = prometheus.NewHistogramVec(prometheus.HistogramOpts{
-		Name:        latencyName,
+		Name:        addPrefixIfNeeded(latencyName, prefix),
 		Help:        "How long it took to process the request, partitioned by status code, method and HTTP path.",
 		ConstLabels: prometheus.Labels{"service": name},
 		Buckets:     buckets,
@@ -62,19 +63,19 @@ func (c Middleware) handler(next http.Handler) http.Handler {
 		start := time.Now()
 		ww := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
 		next.ServeHTTP(ww, r)
-		c.reqs.WithLabelValues(http.StatusText(ww.Status()), r.Method, r.URL.Path).Inc()
-		c.latency.WithLabelValues(http.StatusText(ww.Status()), r.Method, r.URL.Path).Observe(float64(time.Since(start).Nanoseconds()) / 1000000)
+		c.reqs.WithLabelValues(strconv.Itoa(ww.Status()), r.Method, r.URL.Path).Inc()
+		c.latency.WithLabelValues(strconv.Itoa(ww.Status()), r.Method, r.URL.Path).Observe(float64(time.Since(start).Nanoseconds()) / 1000000)
 	}
 	return http.HandlerFunc(fn)
 }
 
 // NewPatternMiddleware returns a new prometheus Middleware handler that groups requests by the chi routing pattern.
 // EX: /users/{firstName} instead of /users/bob
-func NewPatternMiddleware(name string, buckets ...float64) func(next http.Handler) http.Handler {
+func NewPatternMiddleware(name, prefix string, buckets ...float64) func(next http.Handler) http.Handler {
 	var m Middleware
 	m.reqs = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
-			Name:        patternReqsName,
+			Name:        addPrefixIfNeeded(patternReqsName, prefix),
 			Help:        "How many HTTP requests processed, partitioned by status code, method and HTTP path (with patterns).",
 			ConstLabels: prometheus.Labels{"service": name},
 		},
@@ -107,8 +108,15 @@ func (c Middleware) patternHandler(next http.Handler) http.Handler {
 		routePattern := strings.Join(rctx.RoutePatterns, "")
 		routePattern = strings.Replace(routePattern, "/*/", "/", -1)
 
-		c.reqs.WithLabelValues(http.StatusText(ww.Status()), r.Method, routePattern).Inc()
-		c.latency.WithLabelValues(http.StatusText(ww.Status()), r.Method, routePattern).Observe(float64(time.Since(start).Nanoseconds()) / 1000000)
+		c.reqs.WithLabelValues(strconv.Itoa(ww.Status()), r.Method, routePattern).Inc()
+		c.latency.WithLabelValues(strconv.Itoa(ww.Status()), r.Method, routePattern).Observe(float64(time.Since(start).Nanoseconds()) / 1000000)
 	}
 	return http.HandlerFunc(fn)
+}
+
+func addPrefixIfNeeded(name, prefix string) string {
+	if prefix == "" {
+		return name
+	}
+	return prefix + "_" + name
 }
